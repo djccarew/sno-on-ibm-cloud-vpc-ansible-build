@@ -1,0 +1,39 @@
+---
+- name: Check if completiom state file for this playbook exists
+  stat:
+    path: "/ansible/state/{{ sno_cluster_name }}-state.txt"
+  register: file_state
+
+- name: Create state file for this cluster if it doesn't exist
+  file:
+    path: "/ansible/state/{{ sno_cluster_name }}-state.txt"
+    state: touch
+    access_time: preserve
+  when: not file_state.stat.exists
+
+- name: Check if this playbook is complete
+  shell: grep "{{ current_playbook_name }}=COMPLETE" /ansible/state/{{ sno_cluster_name }}-state.txt  > /dev/null
+  register: cmd_rc
+  failed_when: "cmd_rc.rc == 2"
+  changed_when: false
+
+- name: Save playbook completion state
+  set_fact:
+    playbook_completion_state: "complete"
+  when: cmd_rc.rc == 0
+
+- name: Save playbook completion state
+  set_fact:
+    playbook_completion_state: "started"
+  when: cmd_rc.rc == 1
+
+- name: Add completion state of "started" if not there
+  lineinfile:
+    path: "/ansible/state/{{ sno_cluster_name }}-state.txt"
+    state: present
+    line: "{{ current_playbook_name }}=STARTED"
+  when: playbook_completion_state == "started"
+
+- name: Output playbook state 
+  debug:
+    msg: "Playbook {{ current_playbook_name }} state is {{ playbook_completion_state }}"

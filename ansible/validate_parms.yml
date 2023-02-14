@@ -1,0 +1,15 @@
+---
+- hosts: localhost
+  gather_facts: false
+
+  environment:
+    IC_API_KEY: "{{ ic_api_key }}"
+
+  roles:
+    - validate_parms
+    - validate_ibm_cloud_access
+
+  post_tasks:
+    - name: Success message
+      debug:
+        msg: "Parameter validation successful"

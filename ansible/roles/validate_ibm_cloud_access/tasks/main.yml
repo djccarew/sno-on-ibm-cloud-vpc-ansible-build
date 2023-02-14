@@ -1,0 +1,7 @@
+---
+- name: Verify access to the IBM Cloud API by retrieving default resource group
+  ibm_resource_group_info:
+    name: default
+  register: default_resource_group
+  failed_when: default_resource_group.rc != 0
+

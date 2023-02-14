@@ -1,0 +1,16 @@
+<network>
+  <name>default</name>
+  <bridge name='virbr0'/>
+  <forward/>
+  <dns>
+     <host ip='{{ sno_ip_address }}'>
+        <hostname>sno.{{ sno_cluster_name }}.{{ sno_domain_name }}</hostname>
+     </host>
+  </dns>
+  <ip address='192.168.122.1' netmask='255.255.255.0'>
+    <dhcp>
+      <range start='192.168.122.10' end='192.168.122.254'/>
+      <host mac='{{ sno_mac_address }}' name='{{ sno_vm_name }}' ip='{{ sno_ip_address }}'/>
+    </dhcp>
+  </ip>
+</network>

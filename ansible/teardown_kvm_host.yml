@@ -1,0 +1,25 @@
+---
+- name: Destroy all Cloud resources previously created
+  hosts: localhost
+  gather_facts: true
+
+  environment:
+    IC_API_KEY: "{{ ic_api_key }}"
+
+  pre_tasks:
+
+    - name: "Verify that required variables are defined"
+      assert:
+        that:  "{{ item }} is defined"
+        fail_msg: "variable {{ item }} is required for this playbook "
+        success_msg: "Required variable {{ item }} is defined"
+      with_items:
+        - ic_api_key
+        - name_prefix
+        - region
+        - zone
+        - resource_group_name
+        - sno_cluster_name
+
+  roles:
+    - teardown_kvm_host

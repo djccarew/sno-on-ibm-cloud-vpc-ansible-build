@@ -1,0 +1,20 @@
+---
+- name: Check if completiom state file for this playbook exists
+  stat:
+    path: "/ansible/state/{{ sno_cluster_name }}-state.txt"
+  register: file_state
+
+- name: Create state file for this cluster install if it doesn't exist
+  file:
+    path: "/ansible/state/{{ sno_cluster_name }}-state.txt"
+    state: touch
+    access_time: preserve
+  when: not file_state.stat.exists
+
+- name: Add completion state of "COMPLETE" if not there
+  lineinfile:
+    path: "/ansible/state/{{ sno_cluster_name }}-state.txt"
+    search_string: "{{ current_playbook_name }}="
+    state: present
+    line: "{{ current_playbook_name }}=COMPLETE"
+

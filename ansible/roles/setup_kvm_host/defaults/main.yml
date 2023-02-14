@@ -1,0 +1,4 @@
+sno_vm_name: "{{ sno_cluster_name }}-vm"
+sno_ip_address: "192.168.122.3"
+sno_mac_address: 54:50:90:0e:45:12
+

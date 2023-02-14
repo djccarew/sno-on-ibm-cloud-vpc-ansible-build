@@ -1,0 +1,53 @@
+---
+- name: Validate OpenShift version
+  assert:
+    that: "sno_version in ['4.10','4.11']"
+    fail_msg: "variable sno_version must be one of 4.10 or 4.11"
+  when: sno_version is defined
+
+- name: Validate ODF flag
+  assert:
+    that: "setup_odf is boolean"
+    fail_msg: "variable setup_odf must be of type boolean"
+
+- name: Verify ic_api_key parameter is defined 
+  assert:
+    that: 'ic_api_key is defined and ic_api_key is string'
+    fail_msg: "variable ic_api_key must be defined"
+
+- name: Verify rh_api_token parameter is defined 
+  assert:
+    that: 'rh_api_token is defined and rh_api_token is string'
+    fail_msg: "variable rh_api_token must be defined"
+
+- name: Verify sno_domain_name parameter
+  assert:
+    that: 'sno_domain_name is defined and sno_domain_name is string and sno_domain_name is regex("^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.[a-zA-Z]{2,}$")'
+    fail_msg: "variable sno_domain_name must be defined and be in the format of a domain "
+
+- name: "Verify that remaining variables are defined and have valid format"
+  assert:
+    that: "{{ item }} is defined and {{ item }} is string and {{ item }} is regex('^[a-zA-Z][a-zA-Z0-9_-]*[a-zA-Z0-9]$')"
+    fail_msg: "variable {{ item }} is not defined or does not start with an alphabetic char, contains only  alphanumeric chars or dashes and ends with an alphanumeric char"
+  with_items:
+    - name_prefix
+    - region
+    - zone
+    - resource_group_name
+    - sno_cluster_name
+
+- name: Look for pull secret file
+  stat:
+    path: "auth/pull-secret.txt"
+  register: pull_secret_file
+
+- name: Verify that pull secret file exists
+  assert:
+    that: pull_secret_file.stat.exists
+    fail_msg: "Pull secret  file auth/pull-secret.txt is required for this playbook"
+    success_msg: "Required pull secret file exists"
+
+- name: Save validation status as fact
+  set_fact:
+    cacheable: true
+    vars_validated: true

@@ -1,0 +1,84 @@
+---
+- hosts: localhost
+  gather_facts: true
+  collections:
+    - community.general
+    - ansible.posix
+
+  environment:
+    IC_API_KEY: "{{ ic_api_key }}"
+
+  pre_tasks:
+    - name: Set playbook name var
+      set_fact:
+        current_playbook_name: "setup_kvm_host"
+       
+  roles:
+    - role: validate_parms
+      when: vars_validated is not defined
+    - role: check_playbook_complete  
+    - role: get_floating_ip_address
+      when: (fip is not defined or fip.address is not defined) and not playbook_completion_state == "complete"   
+
+  post_tasks:
+    - name: Generate SSH keypair for accessing KVM guests from host
+      openssh_keypair:
+        mode: 0400
+        size: 4096
+        state: present
+        path: "auth/{{ name_prefix }}-remote-id_rsa"
+      when: not playbook_completion_state == "complete"   
+
+    - name: Add VSI to Ansible inventory
+      add_host:
+        name: "{{ fip.address }}"
+        ansible_user: root
+        groups: kvm_vsi
+        ansible_ssh_extra_args: -o StrictHostKeyChecking=no
+      when: fip.address not in groups['kvm_vsi'] | default([])
+
+- hosts: kvm_vsi
+  gather_facts: false
+  become: yes
+  vars:
+    ansible_ssh_private_key_file: "auth/{{ name_prefix }}-local-id_rsa"
+    ansible_python_interpreter: "/usr/bin/python3"
+
+  pre_tasks:
+
+    - name: Get playbook_completion_state from previous play
+      set_fact:
+        playbook_completion_state: "{{ hostvars['localhost']['playbook_completion_state'] }}"
+
+
+  roles:
+    - role: setup_kvm_host
+      when: not playbook_completion_state == "complete"   
+
+  post_tasks:
+
+    - name: Get Floating IP info from previous play
+      set_fact:
+        fip: "{{ hostvars['localhost']['fip']}}"
+      when: not playbook_completion_state == "complete"   
+
+    - name: Show success message
+      vars:
+         fip:
+         msg: |
+                KVM has been succesfully setup on your VSI !
+                You can now run kvm commands by logging in via SSH:
+                    ssh -i auth/{{ name_prefix }}-local-id_rsa root@{{ fip.address }}
+                For root access you can prefix each command with sudo as shown below:
+                    sudo dnf install -y my-favorite-utility
+
+      debug:
+        msg: "{{ msg.split('\n') }}"
+      when: not playbook_completion_state == "complete"   
+
+- hosts: localhost
+  gather_facts: true
+
+  roles:
+    - role: set_playbook_complete
+      when: not playbook_completion_state == "complete"  

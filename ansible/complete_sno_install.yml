@@ -1,0 +1,114 @@
+---
+- hosts: localhost
+  gather_facts: true
+
+
+  pre_tasks:
+    - name: Set playbook name var
+      set_fact:
+        current_playbook_name: "complete_sno_install"
+
+  roles:
+    - role: validate_parms
+      when: vars_validated is not defined
+    - role: check_playbook_complete
+    - role: complete_sno_install
+      when: not playbook_completion_state == "complete"     
+    - role: get_floating_ip_address
+      when: fip is not defined or fip.address is not defined
+
+  environment:
+    IC_API_KEY: "{{ ic_api_key }}"
+
+  post_tasks:
+    - name: Add VSI to Ansible inventory
+      add_host:
+        name: "{{ fip.address }}"
+        ansible_user: root
+        groups: kvm_vsi
+        ansible_ssh_extra_args: -o StrictHostKeyChecking=no
+      when: fip.address not in groups['kvm_vsi'] | default([])
+    
+    - name: Generate custom hosts file for SNO cluster
+      template:
+        src: templates/hosts.j2
+        dest: auth/{{ sno_cluster_name }}.hosts
+      when: not playbook_completion_state == "complete"  
+
+- hosts: kvm_vsi
+  gather_facts: false
+  become: yes
+  vars:
+    ansible_ssh_private_key_file: "auth/{{ name_prefix }}-local-id_rsa"
+    ansible_python_interpreter: "/usr/bin/python3"
+
+  pre_tasks:
+    - name: Get playbook_completion_state from previous play
+      set_fact:
+        playbook_completion_state: "{{ hostvars['localhost']['playbook_completion_state'] }}"
+     
+  roles:
+    - role: setup_haproxy
+      when: not playbook_completion_state == "complete"  
+
+  post_tasks:
+    - name: Get SNO ip address from previous play
+      set_fact:
+        sno_ip: "{{ hostvars['localhost']['sno_ip'] }}"
+      when: not playbook_completion_state == "complete"  
+
+    - name: Add SNO hostnames to KVM host 
+      blockinfile:
+        path: /etc/hosts
+        block: |
+            {{ sno_ip }}	api.{{ sno_cluster_name }}.{{ sno_domain_name }}
+            {{ sno_ip }}	oauth-openshift.apps.{{ sno_cluster_name }}.{{ sno_domain_name }}
+            {{ sno_ip }}	console-openshift-console.apps.{{ sno_cluster_name }}.{{ sno_domain_name }}
+            {{ sno_ip }}	grafana-openshift-monitoring.apps.{{ sno_cluster_name }}.{{ sno_domain_name }}
+            {{ sno_ip }}	thanos-querier-openshift-monitoring.apps.{{ sno_cluster_name }}.{{ sno_domain_name }}
+            {{ sno_ip }}	prometheus-k8s-openshift-monitoring.apps.{{ sno_cluster_name }}.{{ sno_domain_name }}
+            {{ sno_ip }}	alertmanager-main-openshift-monitoring.apps.{{ sno_cluster_name }}.{{ sno_domain_name }}
+      when: not playbook_completion_state == "complete"  
+
+    - name: Get Floating IP info from previous play
+      set_fact:
+        fip: "{{ hostvars['localhost']['fip']}}"
+      when: not playbook_completion_state == "complete"  
+
+    - name: Show access info
+      vars:
+         msg: |
+                The OpenShift SNO cluster is ready ! 
+
+                You can access the KVM host from your local machine via SSH with:
+                
+                  ssh -i auth/{{ name_prefix}}-local-id_rsa kvmadmin@{{ fip.address }}
+
+                You can access the Cockpit Web App from your local machine via browser here:
+
+                  https://{{ fip.address }}:9090
+
+
+                Your OpenShift cluster credentials are in the file auth/{{ sno_cluster_name }}-kubeadmin.json
+
+                Access the OpenShift console from your local machine:
+
+                  1. Add the contents of the file auth/{{ sno_cluster_name }}.hosts to your /etc/hosts file
+
+                  2. You can then access the OpenShift console at the following  URL:
+                     https://console-openshift-console.apps.{{ sno_cluster_name }}.{{ sno_domain_name }}
+
+                To access the cluster via the oc CLI run the following command:
+
+                  oc login api.{{ sno_cluster_name }}.{{ sno_domain_name }}:6443 and login with your credentials 
+
+      debug:
+        msg: "{{ msg.split('\n') }}"
+      when: not playbook_completion_state == "complete"  
+
+- hosts: localhost
+  gather_facts: true
+
+  roles:
+    - role: set_playbook_complete
+      when: not playbook_completion_state == "complete"  

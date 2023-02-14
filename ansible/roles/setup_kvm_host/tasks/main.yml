@@ -1,0 +1,195 @@
+---
+
+- name: Install KVM packages on KVM VSI
+  dnf:
+    name:
+      - '@virt'
+      - libguestfs-tools
+      - python3-libvirt
+      - libvirt-devel
+      - virt-top
+      - virt-manager
+      - python3-lxml
+      - epel-release
+      - virt-install
+      - wget
+    state: installed
+
+- name: Install TPM tools on KVM VSI
+  dnf:
+    name:
+      - swtpm-tools
+    state: installed
+    
+- name: Check if user kvmadmin exists and create if not
+  user:
+    name: kvmadmin
+    shell: /bin/bash
+    groups: libvirt
+    append: yes
+
+- name: Allow KVM tools to be run as kvmadmin user - Step 1
+  lineinfile:
+    path: /etc/libvirt/libvirtd.conf
+    line: 'unix_sock_group = "libvirt"'
+    state: present
+
+- name: Allow KVM tools to be run as kvmadmin user - Step 2
+  lineinfile:
+    path: /etc/libvirt/libvirtd.conf
+    line: 'unix_sock_rw_perms = "0770"'
+    state: present
+
+
+- name: enable and start libvirtd
+  systemd:
+    name: libvirtd
+    state: started
+    enabled: yes
+
+- name: Install Cockpit packages
+  dnf:
+    name:
+      - cockpit
+      - cockpit-machines
+    state: installed
+
+- name: enable and start cockpit
+  shell: |
+    systemctl enable --now cockpit.socket
+
+- name: Add local ssh key to kvmadmin user
+  authorized_key:
+    user: kvmadmin
+    key: "{{ lookup('file', 'auth/' + name_prefix + '-local-id_rsa.pub') }}"
+    state: present
+
+- name: Add user kvmadmin to sudo
+  lineinfile:
+    path: /etc/sudoers.d/kvmadmin
+    line: 'kvmadmin ALL=(ALL) NOPASSWD: ALL'
+    state: present
+    mode: 0440
+    create: yes
+    validate: 'visudo -cf %s'
+
+- name: Copy new SSH keypair for user kvmadmin Step 1
+  copy:
+    src: "auth/{{ name_prefix }}-remote-id_rsa.pub"
+    dest: /home/kvmadmin/.ssh/id_rsa.pub
+    mode: 0400
+    owner: kvmadmin
+    group: kvmadmin
+
+- name: Copy new SSH keypair for user kvmadmin Step 2
+  copy:
+    src: "auth/{{ name_prefix }}-remote-id_rsa"
+    dest: /home/kvmadmin/.ssh/id_rsa
+    mode: 0400
+    owner: kvmadmin
+    group: kvmadmin
+
+- name: Check for DHCP in default KVM network
+  shell: grep '<dhcp>' /run/libvirt/network/default.xml
+  register: grep_network_result
+  failed_when: grep_network_result.rc == 2
+
+
+- name: Check for DNS in default KVM network
+  shell: grep '<dns>' /run/libvirt/network/default.xml
+  register: grep_dns_result
+  failed_when: grep_dns_result.rc == 2
+
+- name: Configure DNS and fixed DHCP address
+  block:
+    - name: Create dir for backup files
+      file:
+        path: /root/ansible-work
+        state: directory
+        mode: 0700
+
+
+    - name: Create pool config from template
+      template:
+        src: default.xml.j2
+        dest: /root/ansible-work/default.xml
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Stop existing default network
+      virt_net:
+        command: destroy
+        name: default
+
+    - name: Undefine existing default network
+      virt_net:
+        command: undefine
+        name: default
+
+    - name: Redefine default network
+      shell: "virsh net-define --file /root/ansible-work/default.xml"
+      register: net_define_output
+
+    - name: Start default network
+      virt_net:
+        command: start
+        name: default
+
+    - name: Ensure that the default network will be started at boot
+      virt_net:
+        autostart: yes
+        name: default
+
+  when: grep_network_result.rc==1 or grep_dns_result.rc==1
+
+- name: Check if storage pool has been setup
+  stat:
+    path: /run/libvirt/storage/default.xml
+  register: pool_config
+
+- name: Setup storage pool
+  block:
+
+    - name: Create dir for storage pool
+      file:
+        path: /mnt/kvmimgs/images
+        state: directory
+        mode: 0771
+
+    - name: Allow kvmadmin r/w access to storage pool dir
+      file:
+        path: /mnt/kvmimgs/images
+        state: directory
+        owner: kvmadmin
+        group: libvirt
+        mode: 0774
+
+    - name: Give qemu user access to images folder
+      shell: setfacl -m u:qemu:rx /mnt/kvmimgs/images
+
+    - name: Set storage pool name
+      set_fact:
+        pool_name: default
+
+    - name: Create pool config from template
+      template:
+        src: pool.xml.j2
+        dest: /root/ansible-work/pool.xml
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Define storage pool
+      shell: virsh pool-define /root/ansible-work/pool.xml
+
+    - name: Build the storage pool
+      shell: virsh pool-build default
+      
+    - name: Start storage pool
+      shell: virsh pool-start default
+
+    - name: Autostart storage pool
+      shell: virsh pool-autostart default
+
+  when: pool_config.stat.exists is defined and not pool_config.stat.exists

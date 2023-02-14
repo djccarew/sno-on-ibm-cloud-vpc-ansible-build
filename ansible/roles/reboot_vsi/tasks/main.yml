@@ -1,0 +1,53 @@
+---
+- name: Reboot using the IBM Cloud API when running locally
+  block:
+    - name: Get VSI data
+      ibm_is_instance_info:
+        name: "{{ name_prefix }}-vsi"
+        region: "{{ region }}"
+      register: vsi_info_output
+      environment:
+        IC_API_KEY: "{{ ic_api_key }}"
+
+    - name: Save VSI info as fact
+      set_fact:
+        cacheable: true
+        vsi: "{{ vsi_info_output.resource }}"
+
+    - name: Reboot VSI
+      ibm_is_instance_action:
+        action: reboot
+        instance: "{{ vsi.id }}"
+      environment:
+        IC_API_KEY: "{{ ic_api_key }}"
+
+    - name: Reboot message
+      debug:
+        msg: Rebooted via IBM Cloud API
+
+  when: inventory_hostname == "localhost"
+
+
+- name: Reboot using Ansible task when running on a remote host
+  block:
+    - name: Reboot task
+      reboot:
+
+    - name: Reboot message
+      debug:
+        msg: Rebooted via Ansible task
+
+  when: inventory_hostname != "localhost"
+
+- name: Wait for VSI to come back up
+  wait_for:
+    host: "{{ fip.address }}"
+    port: 22
+    delay: 20
+    timeout: 360
+    sleep: 10
+    state: started
+
+- name: Success message
+  debug:
+    msg: "VSI successfully rebooted"

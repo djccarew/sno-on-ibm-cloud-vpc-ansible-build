@@ -1,0 +1,103 @@
+---
+- hosts: localhost
+  gather_facts: true
+
+  pre_tasks:
+    - name: Set playbook name var
+      set_fact:
+        current_playbook_name: "provision_kvm_host"
+
+  roles:
+    - role: validate_parms
+      when: vars_validated is not defined
+    - role: check_playbook_complete 
+    - role: provision_kvm_host
+      when: not playbook_completion_state == "complete"   
+    - role: get_floating_ip_address
+      when: (fip is not defined or fip.address is not defined) 
+  
+
+  environment:
+    IC_API_KEY: "{{ ic_api_key }}"
+
+  post_tasks:
+    - name: Add VSI to Ansible inventory
+      add_host:
+        name: "{{ fip.address }}"
+        ansible_user: root
+        groups: kvm_vsi
+        ansible_ssh_extra_args: -o StrictHostKeyChecking=no
+      when: fip.address not in groups['kvm_vsi'] | default([])
+
+    - name: Wait for VSI to become reachable over SSH
+      wait_for:
+        host: "{{ fip.address }}"
+        port: 22
+        delay: 20
+        timeout: 360
+        sleep: 10
+        state: started
+      when: not playbook_completion_state == "complete"   
+
+- hosts: kvm_vsi
+  gather_facts: false
+  become: yes
+  vars:
+    ansible_ssh_private_key_file: "auth/{{ name_prefix }}-local-id_rsa"
+    ansible_python_interpreter: "/usr/bin/python3"
+
+  pre_tasks:
+
+    - name: Get playbook_completion_state from previous play
+      set_fact:
+        playbook_completion_state: "{{ hostvars['localhost']['playbook_completion_state'] }}"
+
+    - name: Install Python on remote server for Ansible
+      raw: "{{ item }}"
+      loop:
+        - yum update -y
+        - yum install -y python3
+      when: not playbook_completion_state == "complete"   
+
+    - name: Collect OS information
+      command: cat /etc/os-release
+      register: os_info
+      when: not playbook_completion_state == "complete"   
+       
+    - name: Print OS information
+      debug:
+        var: os_info.stdout_lines
+      when:  not playbook_completion_state == "complete"    
+
+    - name: Get Floating IP info from previous play
+      set_fact:
+        fip: "{{ hostvars['localhost']['fip']}}"
+      when: not playbook_completion_state == "complete"   
+
+  roles:
+    - role: format_data_disk
+      when: not playbook_completion_state == "complete"   
+    - role: disable_se_linux
+      when: not playbook_completion_state == "complete"   
+    - role: reboot_vsi
+      when: not playbook_completion_state == "complete"  and selinux_out is defined and selinux_out.reboot_required  is defined and selinux_out.reboot_required 
+
+  post_tasks:
+
+    - name: Show access info
+      vars:
+
+         msg: |
+                Your VSI has been successfully provisioned !
+                Login in via SSH using the command:
+                ssh -i auth/{{ name_prefix }}-local-id_rsa root@{{ fip.address }}
+      debug:
+        msg: "{{ msg.split('\n') }}"
+      when: not playbook_completion_state == "complete"   
+
+- hosts: localhost
+  gather_facts: true
+
+  roles:
+    - role: set_playbook_complete
+      when: not playbook_completion_state == "complete"  
